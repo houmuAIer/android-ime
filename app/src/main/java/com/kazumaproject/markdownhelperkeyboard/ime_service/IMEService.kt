@@ -18135,7 +18135,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         if (isGojuonSurface()) return
         val state = when {
             inputString.value.isNotEmpty() -> com.kazumaproject.core.atok.AtokSymbolKeyState.KANA_EISU
-            shouldShowReconversionButton() -> com.kazumaproject.core.atok.AtokSymbolKeyState.RECONVERT
+            atokCanReconvert() -> com.kazumaproject.core.atok.AtokSymbolKeyState.RECONVERT
             else -> com.kazumaproject.core.atok.AtokSymbolKeyState.DEFAULT
         }
         mainView.keyboardView.setAtokSymbolKeyState(state)
@@ -18165,12 +18165,48 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             }
             return true
         }
-        if (shouldShowReconversionButton()) {
+        if (atokCanReconvert()) {
             vibrate()
-            performPendingReconversion()
+            atokPerformReconversion()
             return true
         }
         return false
+    }
+
+    /**
+     * [atok-style] 後変換できる状態か。本家の「再変換」設定に関係なく、
+     * 直前に確定した文字列（読み付き）が残っていて未入力なら true。
+     */
+    private fun atokCanReconvert(): Boolean {
+        val entry = pendingReconversionEntry ?: return false
+        if (entry.committedText.isEmpty() || entry.reading.isEmpty()) return false
+        if (inputString.value.isNotEmpty() || stringInTail.get().isNotEmpty()) return false
+        if (isHenkan.get()) return false
+        return true
+    }
+
+    /** [atok-style] カーソル直前が確定した文字列のままか確かめてから再変換する **/
+    private fun atokPerformReconversion() {
+        val entry = pendingReconversionEntry ?: return
+        val inputConnection = currentInputConnection ?: return
+        ioScope.launch {
+            val valid = editorConnectionReadMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    inputConnection.getTextBeforeCursor(entry.committedText.length, 0)
+                        ?.toString()
+                        .orEmpty()
+                        .endsWith(entry.committedText)
+                }
+            }
+            withContext(Dispatchers.Main.immediate) {
+                if (pendingReconversionEntry !== entry || currentInputConnection !== inputConnection) {
+                    return@withContext
+                }
+                pendingReconversionValid = valid
+                performPendingReconversion()
+                updateAtokSymbolKeyState()
+            }
+        }
     }
 
 
