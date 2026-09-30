@@ -281,6 +281,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private var atokDeleteSlideListener: ((com.kazumaproject.core.atok.AtokDeleteSlideAction) -> Unit)? = null
     private var atokDeleteSlideAction: com.kazumaproject.core.atok.AtokDeleteSlideAction? = null
     private var atokDeleteSlidePopup: PopupWindow? = null
+    private var atokDeleteSlideLabel: android.widget.TextView? = null
+    private var atokDeleteIconChanged = false
 
     private val cachedContentCopyDrawable: Drawable? by lazy {
         ContextCompat.getDrawable(
@@ -1425,7 +1427,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             if (action != atokDeleteSlideAction) {
                 showAtokDeleteSlidePopup(action, stage, isLeft)
             }
-        } else {
+        } else if (atokDeleteSlideAction != null) {
             hideAtokDeleteSlidePopup()
         }
         atokDeleteSlideAction = action
@@ -1438,41 +1440,59 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         isLeft: Boolean
     ) {
         val anchor = binding.keyDelete
+        atokDeleteIconChanged = true
+        // 削除キー自体のアイコンも現在の動作に切り替える（指が離れた位置からでも見える）
+        anchor.setImageDrawable(
+            ContextCompat.getDrawable(
+                context,
+                when (action) {
+                    com.kazumaproject.core.atok.AtokDeleteSlideAction.WORD_BEFORE ->
+                        com.kazumaproject.core.R.drawable.backspace_24px_until_symbol
+
+                    com.kazumaproject.core.atok.AtokDeleteSlideAction.FORWARD_ONE ->
+                        com.kazumaproject.core.R.drawable.backspace_24px_after_cursor
+
+                    else -> com.kazumaproject.core.R.drawable.baseline_delete_24
+                }
+            )
+        )
         val w = anchor.width
         val h = anchor.height
         if (w <= 0 || h <= 0) return
-        val popup = atokDeleteSlidePopup ?: PopupWindow(context).also { p ->
-            val density = resources.displayMetrics.density
-            p.contentView = android.widget.TextView(context).apply {
-                gravity = android.view.Gravity.CENTER
-                setTextColor(Color.WHITE)
-                textSize = 13f
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    cornerRadius = 10f * density
-                    setColor(0xE6303134.toInt())
-                }
+        val label = atokDeleteSlideLabel ?: android.widget.TextView(context).apply {
+            gravity = android.view.Gravity.CENTER
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 10f * resources.displayMetrics.density
+                setColor(0xE6303134.toInt())
             }
-            p.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-            p.isClippingEnabled = false
-            p.isTouchable = false
-            p.isFocusable = false
-            p.elevation = 8f * density
-            atokDeleteSlidePopup = p
+        }.also { atokDeleteSlideLabel = it }
+        label.text = action.label
+        // 本家のフリック表示と同じ作り方にする（内容・サイズを渡して生成し、表示のたびに出し直す）
+        atokDeleteSlidePopup?.let { if (it.isShowing) it.dismiss() }
+        (label.parent as? android.view.ViewGroup)?.removeView(label)
+        val popup = PopupWindow(label, w, h, false).apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            isTouchable = false
         }
-        (popup.contentView as? android.widget.TextView)?.text = action.label
+        atokDeleteSlidePopup = popup
         val xOff = if (isLeft) -stage * w else 0
         val yOff = if (isLeft) -h else -(stage + 1) * h
-        if (popup.isShowing) {
-            popup.update(anchor, xOff, yOff, w, h)
-        } else {
-            popup.width = w
-            popup.height = h
-            runCatching { popup.showAsDropDown(anchor, xOff, yOff) }
+        try {
+            popup.showAsDropDown(anchor, xOff, yOff, android.view.Gravity.START)
+        } catch (e: Exception) {
+            Log.w("TenKey", "atok delete slide popup failed", e)
         }
     }
 
     private fun hideAtokDeleteSlidePopup() {
         atokDeleteSlidePopup?.let { if (it.isShowing) runCatching { it.dismiss() } }
+        atokDeleteSlidePopup = null
+        if (atokDeleteIconChanged) {
+            atokDeleteIconChanged = false
+            binding.keyDelete.setImageDrawable(cachedBackSpaceDrawable)
+        }
     }
 
     /** [atok-style] ACTION_UP 時の削除キー処理。処理した場合は true **/
