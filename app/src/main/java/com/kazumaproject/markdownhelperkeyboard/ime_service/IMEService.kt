@@ -24792,10 +24792,26 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 commitAndClearInput(readingCorrection.first)
             }
 
-            9,
+            // [atok-style] 絵文字(11)・顔文字(12)・記号(13)の辞書候補も学習する（てん→・ など）
             11,
             12,
-            13,
+            13 -> {
+                if (com.kazumaproject.core.atok.AtokStyle.ENABLED &&
+                    insertString.length == candidate.length.toInt()
+                ) {
+                    handleExactLengthMatch(
+                        insertString = insertString,
+                        candidateString = candidate.string,
+                        candidate = candidate,
+                        currentInputMode = currentInputMode,
+                        position = position
+                    )
+                } else {
+                    commitAndClearInput(candidate.string)
+                }
+            }
+
+            9,
             14,
             28,
             30,
