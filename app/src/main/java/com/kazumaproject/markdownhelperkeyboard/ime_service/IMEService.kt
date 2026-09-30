@@ -10434,6 +10434,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             })
             if (com.kazumaproject.core.atok.AtokStyle.ENABLED) {
                 setOnAtokDeleteSlideListener { action -> handleAtokDeleteSlide(action) }
+                setOnAtokEmojiSwipeListener { emoji -> handleAtokEmojiSwipe(emoji) }
+                refreshAtokEmojiSwipeItems()
             }
             setOnFlickListener(object : FlickListener {
                 override fun onFlick(gestureType: GestureType, key: Key, char: Char?) {
@@ -26855,6 +26857,35 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         }
     }
 
+    /** [atok-style] 絵文字キーからのスワイプで選んだ絵文字を入力し、履歴に残す **/
+    private fun handleAtokEmojiSwipe(emoji: String) {
+        if (isKeyboardLayoutEditModeActive()) return
+        vibrate()
+        commitText(emoji, 1)
+        ioScope.launch {
+            runCatching {
+                clickedSymbolRepository.insert(mode = SymbolMode.EMOJI, symbol = emoji)
+            }
+            refreshAtokEmojiSwipeItems()
+        }
+    }
+
+    /** [atok-style] スワイプ一覧の中身（最近使った絵文字 → 既定の絵文字）を更新する **/
+    private fun refreshAtokEmojiSwipeItems() {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return
+        ioScope.launch {
+            val history = runCatching { clickedSymbolRepository.getAll() }
+                .getOrDefault(emptyList())
+                .filter { it.mode == SymbolMode.EMOJI }
+                .sortedByDescending { it.timestamp }
+                .map { it.symbol }
+            val items = (history + ATOK_DEFAULT_SWIPE_EMOJIS).distinct().take(23)
+            withContext(Dispatchers.Main) {
+                mainLayoutBinding?.keyboardView?.setAtokEmojiSwipeItems(items)
+            }
+        }
+    }
+
     /** [atok-style] 削除キーの2段スライドの実行 **/
     private fun handleAtokDeleteSlide(action: com.kazumaproject.core.atok.AtokDeleteSlideAction) {
         if (isKeyboardLayoutEditModeActive()) return
@@ -29800,3 +29831,10 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
 // [atok-style] 左全削除・右全削除で一度に読み取る最大文字数
 private const val ATOK_DELETE_ALL_MAX_CHARS = 10_000
+
+// [atok-style] 絵文字スワイプの既定の並び（使った絵文字が先頭に来る）
+private val ATOK_DEFAULT_SWIPE_EMOJIS = listOf(
+    "😊", "😂", "🙏", "👍", "🙇", "😭", "🤔", "😅",
+    "✨", "🎉", "💦", "❤️", "👏", "🙌", "😍", "😢",
+    "😆", "🥺", "👀", "💪", "🔥", "⭐", "🍺",
+)

@@ -301,6 +301,86 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         )
     }
 
+    // [atok-style] 絵文字キーからのスワイプ入力
+    private var atokEmojiListener: ((String) -> Unit)? = null
+    private var atokEmojiPanel: com.kazumaproject.tenkey.view.AtokEmojiSwipePanel? = null
+    private var atokEmojiItems: List<String> = emptyList()
+    private var atokEmojiSwipeActive = false
+
+    fun setOnAtokEmojiSwipeListener(listener: ((String) -> Unit)?) {
+        atokEmojiListener = listener
+    }
+
+    fun setAtokEmojiSwipeItems(items: List<String>) {
+        atokEmojiItems = items
+        atokEmojiPanel?.setItems(items)
+    }
+
+    private fun ensureAtokEmojiPanel(): com.kazumaproject.tenkey.view.AtokEmojiSwipePanel {
+        atokEmojiPanel?.let { return it }
+        val panel = com.kazumaproject.tenkey.view.AtokEmojiSwipePanel(context).apply {
+            visibility = View.GONE
+            elevation = 100f * resources.displayMetrics.density
+            isClickable = false
+            isFocusable = false
+            setItems(atokEmojiItems)
+        }
+        val lp = ConstraintLayout.LayoutParams(0, 0).apply {
+            startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+            endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+            topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+            bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+        }
+        addView(panel, lp)
+        atokEmojiPanel = panel
+        return panel
+    }
+
+    private fun hideAtokEmojiPanel() {
+        atokEmojiSwipeActive = false
+        atokEmojiPanel?.apply {
+            setHighlight(-1)
+            visibility = View.GONE
+        }
+    }
+
+    /**
+     * [atok-style] 未入力時の絵文字キーを押したまま動かしたら絵文字一覧を出し、指の下のマスを強調する。
+     * 絵文字キーを扱った場合は true（通常のフリック処理を行わない）。
+     */
+    private fun handleAtokEmojiSwipeMove(event: MotionEvent): Boolean {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return false
+        if (atokEmojiListener == null) return false
+        if (pressedKey.key != Key.SideKeySymbol || isLongPressed) return false
+        if (atokSymbolKeyState != com.kazumaproject.core.atok.AtokSymbolKeyState.DEFAULT) return false
+        if (currentInputMode.value != InputMode.ModeJapanese) return false
+        if (event.pointerCount != 1) return false
+        val (x, y) = getRawCoordinates(event, 0)
+        if (!atokEmojiSwipeActive) {
+            val dx = x - pressedKey.initialX
+            val dy = y - pressedKey.initialY
+            if (dx * dx + dy * dy < flickThresholdPx * flickThresholdPx) return true
+            if (atokEmojiItems.isEmpty()) return false
+            longPressJob?.cancel()
+            val panel = ensureAtokEmojiPanel()
+            panel.visibility = View.VISIBLE
+            panel.bringToFront()
+            atokEmojiSwipeActive = true
+        }
+        atokEmojiPanel?.let { it.setHighlight(it.cellAtRaw(x, y)) }
+        return true
+    }
+
+    /** [atok-style] スワイプ中に指を離したら、そのマスの絵文字を入力する。処理した場合は true **/
+    private fun handleAtokEmojiSwipeUp(event: MotionEvent): Boolean {
+        if (!atokEmojiSwipeActive) return false
+        val (x, y) = getRawCoordinates(event, event.actionIndex)
+        val emoji = atokEmojiPanel?.let { it.itemAtCell(it.cellAtRaw(x, y)) }
+        hideAtokEmojiPanel()
+        if (emoji != null) atokEmojiListener?.invoke(emoji)
+        return true
+    }
+
     fun setAtokSymbolKeyState(state: com.kazumaproject.core.atok.AtokSymbolKeyState) {
         atokSymbolKeyState = state
         applyAtokSymbolKeyOverride()
@@ -1673,6 +1753,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                     val (initialX, initialY) = getRawCoordinates(event, event.actionIndex)
                     pressedKey = PressedKey(key = key, pointer = 0, initialX = initialX, initialY = initialY)
                     atokDeleteSlideAction = null
+                    if (atokEmojiSwipeActive) hideAtokEmojiPanel()
 
                     if (isCursorMode) {
                         flickTextPreviewEmitter.cancel()
@@ -1712,6 +1793,12 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                         }
                         handleCurrentInputModeSwitch(currentInputMode.value)
                         isCursorMode = false
+                        return false
+                    }
+
+                    if (handleAtokEmojiSwipeUp(event)) {
+                        resetAllKeys()
+                        popupWindowActive.hide()
                         return false
                     }
 
@@ -1795,6 +1882,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                     }
 
                     if (handleAtokDeleteSlideMove(event)) return false
+                    if (handleAtokEmojiSwipeMove(event)) return false
 
                     val gestureType = if (event.pointerCount == 1) {
                         getGestureType(event, 0)
@@ -1907,6 +1995,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private fun cancelActiveTouch(reason: KeyTouchCancelReason) {
+        hideAtokEmojiPanel()
         atokDeleteSlideAction = null
         hideAtokDeleteSlidePopup()
         skinGuide?.dismiss()
