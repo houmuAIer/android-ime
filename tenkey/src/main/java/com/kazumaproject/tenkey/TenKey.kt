@@ -301,7 +301,137 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         )
     }
 
+    // [atok-style] フリックガイド（キーの1段上に丸く表示）
+    private var atokFlickRingPopup: PopupWindow? = null
+    private var atokFlickRingView: com.kazumaproject.tenkey.view.AtokFlickRingView? = null
+
+    private fun atokRingLabels(key: Key): Map<com.kazumaproject.tenkey.view.AtokFlickRingView.Direction, String>? {
+        if (key == Key.KeyDakutenSmall) {
+            if (currentInputMode.value != InputMode.ModeJapanese) return null
+            return if (atokBracketMode) {
+                mapOf(
+                    com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.CENTER to "(",
+                    com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.LEFT to ")",
+                )
+            } else {
+                mapOf(
+                    com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.CENTER to "゛゜小",
+                    com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.LEFT to ")",
+                    com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.TOP to "゛",
+                    com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.RIGHT to "゜",
+                    com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.BOTTOM to "小",
+                )
+            }
+        }
+        val button = getButtonFromKey(key) as? AppCompatButton ?: return null
+        if (button !in characterButtons()) return null
+        val info = currentInputMode.value.next(keyMap = keyMap, key = key, isGojuon = false)
+                as? KeyInfo.KeyTapFlickInfo ?: return null
+        fun Char?.s() = this?.toString().orEmpty()
+        return mapOf(
+            com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.CENTER to info.tap.s(),
+            com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.LEFT to info.flickLeft.s(),
+            com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.TOP to info.flickTop.s(),
+            com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.RIGHT to info.flickRight.s(),
+            com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.BOTTOM to info.flickBottom.s(),
+        )
+    }
+
+    /** [atok-style] 文字キーを押したとき、キーの1段上にフリックガイドを出す **/
+    private fun atokShowFlickRing(key: Key) {
+        atokHideFlickRing()
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return
+        if (isCursorMode || keyboardSkinId != KeyboardSkinId.DEFAULT) return
+        val labels = atokRingLabels(key) ?: return
+        val anchor = getButtonFromKey(key) as? View ?: return
+        val w = anchor.width
+        val h = anchor.height
+        if (w <= 0 || h <= 0) return
+        val size = (minOf(w, h) * 2.1f).toInt()
+        val view = atokFlickRingView ?: com.kazumaproject.tenkey.view.AtokFlickRingView(context)
+            .also { atokFlickRingView = it }
+        (view.parent as? android.view.ViewGroup)?.removeView(view)
+        view.setLabels(labels)
+        view.setSelected(com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.CENTER)
+        val popup = PopupWindow(view, size, size, false).apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            isTouchable = false
+        }
+        atokFlickRingPopup = popup
+        // 円の中心を「キーの中心から1段上」に置く
+        val xOff = (w - size) / 2
+        val yOff = -(h + h / 2 + size / 2)
+        try {
+            popup.showAsDropDown(anchor, xOff, yOff, android.view.Gravity.START)
+        } catch (e: Exception) {
+            Log.w("TenKey", "atok flick ring failed", e)
+        }
+    }
+
+    private fun atokUpdateFlickRing(gestureType: GestureType) {
+        if (atokFlickRingPopup?.isShowing != true) return
+        // 本家のフリック表示は指の下に出るので隠す
+        popupWindowActive.hide()
+        popupWindowLeft.hide()
+        popupWindowTop.hide()
+        popupWindowRight.hide()
+        popupWindowBottom.hide()
+        popupWindowCenter.hide()
+        atokFlickRingView?.setSelected(
+            when (gestureType) {
+                GestureType.FlickLeft -> com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.LEFT
+                GestureType.FlickTop -> com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.TOP
+                GestureType.FlickRight -> com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.RIGHT
+                GestureType.FlickBottom -> com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.BOTTOM
+                else -> com.kazumaproject.tenkey.view.AtokFlickRingView.Direction.CENTER
+            }
+        )
+    }
+
+    private fun atokHideFlickRing() {
+        atokFlickRingPopup?.let { if (it.isShowing) runCatching { it.dismiss() } }
+        atokFlickRingPopup = null
+    }
+
+    // [atok-style] かなキーの数字・英字表示（例: 2 / ABC）
+    private var atokKeyHints: List<Pair<AppCompatButton, com.kazumaproject.tenkey.view.AtokKeyHintDrawable>>? = null
+
+    private fun atokSetKeyHintsVisible(visible: Boolean) {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return
+        val hints = atokKeyHints ?: run {
+            val spec = binding.run {
+                listOf(
+                    key1 to ("1" to "@#/_"), key2 to ("2" to "ABC"), key3 to ("3" to "DEF"),
+                    key4 to ("4" to "GHI"), key5 to ("5" to "JKL"), key6 to ("6" to "MNO"),
+                    key7 to ("7" to "PQRS"), key8 to ("8" to "TUV"), key9 to ("9" to "WXYZ"),
+                    key11 to ("0" to ""), key12 to ("#" to ""),
+                )
+            }
+            spec.map { (button, texts) ->
+                val drawable = com.kazumaproject.tenkey.view.AtokKeyHintDrawable(
+                    button, texts.first, texts.second
+                )
+                drawable.setBounds(0, 0, button.width, button.height)
+                button.overlay.add(drawable)
+                button.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                    drawable.setBounds(0, 0, v.width, v.height)
+                }
+                button to drawable
+            }.also { atokKeyHints = it }
+        }
+        hints.forEach { (button, drawable) ->
+            drawable.alpha = if (visible) 255 else 0
+            button.invalidate()
+        }
+    }
+
     // [atok-style] 絵文字キーからのスワイプ入力
+    private var atokEmojiPageListener: (() -> Unit)? = null
+
+    fun setOnAtokEmojiPageListener(listener: (() -> Unit)?) {
+        atokEmojiPageListener = listener
+    }
+
     private var atokEmojiListener: ((String) -> Unit)? = null
     private var atokEmojiPanel: com.kazumaproject.tenkey.view.AtokEmojiSwipePanel? = null
     private var atokEmojiItems: List<String> = emptyList()
@@ -375,9 +505,15 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private fun handleAtokEmojiSwipeUp(event: MotionEvent): Boolean {
         if (!atokEmojiSwipeActive) return false
         val (x, y) = getRawCoordinates(event, event.actionIndex)
-        val emoji = atokEmojiPanel?.let { it.itemAtCell(it.cellAtRaw(x, y)) }
+        val panel = atokEmojiPanel
+        val cell = panel?.cellAtRaw(x, y) ?: -1
+        val emoji = panel?.itemAtCell(cell)
+        val openPage = panel?.isEmojiPageCell(cell) == true
         hideAtokEmojiPanel()
-        if (emoji != null) atokEmojiListener?.invoke(emoji)
+        when {
+            emoji != null -> atokEmojiListener?.invoke(emoji)
+            openPage -> atokEmojiPageListener?.invoke()
+        }
         return true
     }
 
@@ -1598,8 +1734,9 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             isTouchable = false
         }
         atokDeleteSlidePopup = popup
-        val xOff = if (isLeft) -stage * w else 0
-        val yOff = if (isLeft) -h else -(stage + 1) * h
+        // 指で隠れないよう、左スライドは移動先の1段上、上スライドは移動先の左隣に出す
+        val xOff = if (isLeft) -stage * w else -w
+        val yOff = if (isLeft) -2 * h else -(stage + 1) * h
         try {
             popup.showAsDropDown(anchor, xOff, yOff, android.view.Gravity.START)
         } catch (e: Exception) {
@@ -1765,6 +1902,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                     )
 
                     setKeyPressed()
+                    atokShowFlickRing(key)
                     longPressJob = scope.launch {
                         delay(longPressTimeout)
                         if (pressedKey.key != Key.NotSelected) {
@@ -1777,6 +1915,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                 }
 
                 MotionEvent.ACTION_UP -> {
+                    atokHideFlickRing()
                     resetLongPressAction(animateLabels = true)
                     if (isCursorMode) {
                         val viewToRelease: View? = when (pressedKey.key) {
@@ -1900,10 +2039,12 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                             gestureType
                         )
                     }
+                    atokUpdateFlickRing(gestureType)
                     return false
                 }
 
                 MotionEvent.ACTION_POINTER_DOWN -> {
+                    atokHideFlickRing()
                     if (isLongPressed) {
                         hideAllPopWindow()
                         Blur.removeBlurEffect(this)
@@ -1995,6 +2136,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private fun cancelActiveTouch(reason: KeyTouchCancelReason) {
+        atokHideFlickRing()
         hideAtokEmojiPanel()
         atokDeleteSlideAction = null
         hideAtokDeleteSlidePopup()
@@ -2475,6 +2617,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     /** Called when a long‐press is detected; show all related popups **/
     private fun onLongPressed() {
+        // [atok-style] フリックガイド表示中は本家の長押しガイドを出さない
+        if (atokFlickRingPopup?.isShowing == true) return
         val button = getButtonFromKey(pressedKey.key)
         button?.let {
             if (it is AppCompatButton) {
@@ -2947,6 +3091,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private fun setKeysCursorMoveMode() {
+        atokSetKeyHintsVisible(false)
         binding.apply {
             key1.text = ""
             key2.text = ""
@@ -3078,6 +3223,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             applyAtokSmallLetterOverride(forceJapanese = true)
             atokSymbolKeyOverridden = false
             applyAtokSymbolKeyOverride(forceJapanese = true)
+            atokSetKeyHintsVisible(true)
             keyMoveCursorRight.setImageDrawable(
                 cachedArrowRightDrawable
             )
@@ -3090,6 +3236,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     /** Populate all main keys with English labels **/
     private fun setKeysInEnglishText() {
+        atokSetKeyHintsVisible(false)
         binding.apply {
             characterButtons().forEach { button ->
                 setEnglishTextFor(button)
@@ -3113,6 +3260,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
     /** Populate all main keys with Number labels **/
     private fun setKeysInNumberText() {
+        atokSetKeyHintsVisible(false)
         binding.apply {
             characterButtons().forEach { button ->
                 setNumberTextFor(button)

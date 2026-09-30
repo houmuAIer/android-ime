@@ -10435,6 +10435,12 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             if (com.kazumaproject.core.atok.AtokStyle.ENABLED) {
                 setOnAtokDeleteSlideListener { action -> handleAtokDeleteSlide(action) }
                 setOnAtokEmojiSwipeListener { emoji -> handleAtokEmojiSwipe(emoji) }
+                setOnAtokEmojiPageListener {
+                    if (!isKeyboardLayoutEditModeActive()) {
+                        vibrate()
+                        _keyboardSymbolViewState.value = SymbolKeyboardState(isShown = true)
+                    }
+                }
                 refreshAtokEmojiSwipeItems()
             }
             setOnFlickListener(object : FlickListener {
@@ -18137,7 +18143,6 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         if (isGojuonSurface()) return
         val state = when {
             inputString.value.isNotEmpty() -> com.kazumaproject.core.atok.AtokSymbolKeyState.KANA_EISU
-            atokCanReconvert() -> com.kazumaproject.core.atok.AtokSymbolKeyState.RECONVERT
             else -> com.kazumaproject.core.atok.AtokSymbolKeyState.DEFAULT
         }
         mainView.keyboardView.setAtokSymbolKeyState(state)
@@ -18167,11 +18172,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             }
             return true
         }
-        if (atokCanReconvert()) {
-            vibrate()
-            atokPerformReconversion()
-            return true
-        }
+        // 後変換は使わない（確定後は常に絵文字・記号キー）
         return false
     }
 
@@ -26879,7 +26880,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 .filter { it.mode == SymbolMode.EMOJI }
                 .sortedByDescending { it.timestamp }
                 .map { it.symbol }
-            val items = (history + ATOK_DEFAULT_SWIPE_EMOJIS).distinct().take(23)
+            val items = (history + ATOK_DEFAULT_SWIPE_EMOJIS).distinct().take(15)
             withContext(Dispatchers.Main) {
                 mainLayoutBinding?.keyboardView?.setAtokEmojiSwipeItems(items)
             }
