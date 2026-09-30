@@ -3976,6 +3976,31 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         refreshCandidateStripContent()
     }
 
+    /**
+     * [atok-style] ATOKと同じく「前に選んだ候補」を最優先にする。
+     * 読み全体に対して学習済みの変換結果が候補に含まれていれば、最後に使った順に先頭へ移す。
+     * （本家の学習は変換の重み付けに使われるだけで、記号候補などは先頭に来ないことがあるため）
+     */
+    private suspend fun atokPromoteLearnedCandidates(
+        input: String,
+        candidates: List<Candidate>,
+    ): List<Candidate> {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return candidates
+        if (input.isEmpty() || candidates.isEmpty()) return candidates
+        val repository = learnedRepositoryForSuggestion() ?: return candidates
+        val learnedOutputs = runCatching { repository.findExactMatchesForConversion(input) }
+            .getOrDefault(emptyList())
+            .sortedWith(compareByDescending<com.kazumaproject.markdownhelperkeyboard.learning.database.LearnEntity> { it.lastUsedAt }.thenByDescending { it.usageCount })
+            .map { it.out }
+            .distinct()
+        if (learnedOutputs.isEmpty()) return candidates
+        val promoted = learnedOutputs.mapNotNull { out ->
+            candidates.firstOrNull { it.string == out && it.length.toInt() == input.length }
+        }
+        if (promoted.isEmpty()) return candidates
+        return promoted + candidates.filterNot { candidate -> promoted.any { it === candidate } }
+    }
+
     private fun learnedRepositoryForSuggestion(): LearnRepository? {
         if (isLearnDictionaryMode != true) return null
         if (isPrivateMode && !showLearnedCandidatesInIncognitoPreference) return null
@@ -25742,7 +25767,9 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         ) {
             emitZenzLiveRequest(insertString)
         }
-        val candidates = getSuggestionList(insertString, mainView, token)
+        val candidates = atokPromoteLearnedCandidates(
+            insertString, getSuggestionList(insertString, mainView, token)
+        )
         val filtered = if (stringInTail.get().isNotEmpty()) {
             candidates.filter { it.length.toInt() == insertString.length }
         } else {
@@ -25843,7 +25870,9 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         ) {
             emitZenzLiveRequest(insertString)
         }
-        val candidates = getSuggestionListOriginal(insertString, mainView, token)
+        val candidates = atokPromoteLearnedCandidates(
+            insertString, getSuggestionListOriginal(insertString, mainView, token)
+        )
         val filtered = if (stringInTail.get().isNotEmpty()) {
             candidates.filter { it.length.toInt() == insertString.length }
         } else {
@@ -25929,7 +25958,9 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     ) {
         beginZenzRerankRequest()
         clearZenzLiveSlot("candidate tab without Zenz live")
-        val candidates = getSuggestionListWithoutPrediction(insertString, token)
+        val candidates = atokPromoteLearnedCandidates(
+            insertString, getSuggestionListWithoutPrediction(insertString, token)
+        )
         val filtered = if (stringInTail.get().isNotEmpty()) {
             candidates.filter { it.length.toInt() == insertString.length }
         } else {
