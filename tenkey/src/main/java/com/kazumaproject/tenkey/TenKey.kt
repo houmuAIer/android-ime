@@ -267,6 +267,16 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         )
     }
 
+    // [atok-style] 未入力時・かな以外の直後は「（）」キー、かな入力中は「゛゜小」キーとして表示する
+    private var atokBracketMode: Boolean = true
+
+    private val cachedBracketsPairDrawable: Drawable? by lazy {
+        ContextCompat.getDrawable(
+            context,
+            com.kazumaproject.core.R.drawable.brackets_pair
+        )
+    }
+
     private val cachedContentCopyDrawable: Drawable? by lazy {
         ContextCompat.getDrawable(
             context,
@@ -2549,6 +2559,22 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         drawable: Drawable? = cachedLanguageDrawable
     ) {
         binding.keySmallLetter.setImageDrawable(drawable)
+        applyAtokSmallLetterOverride()
+    }
+
+    /** [atok-style] 入力中の末尾がかなかどうかで「（）」/「゛゜小」を切り替える **/
+    fun setAtokBracketMode(enabled: Boolean) {
+        atokBracketMode = enabled
+        applyAtokSmallLetterOverride()
+    }
+
+    private fun applyAtokSmallLetterOverride(forceJapanese: Boolean = false) {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return
+        if (isCursorMode) return
+        if (!forceJapanese && currentInputMode.value != InputMode.ModeJapanese) return
+        binding.keySmallLetter.setImageDrawable(
+            if (atokBracketMode) cachedBracketsPairDrawable else cachedKanaDrawable
+        )
     }
 
     /** Set default drawable for the small/dakuten key **/
@@ -2565,6 +2591,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                 binding.keySmallLetter.setImageDrawable(cachedKanaDrawable)
             }
         }
+        applyAtokSmallLetterOverride()
     }
 
     /** Set custom drawable on the Enter key **/
@@ -2771,6 +2798,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                 keySmallLetter.setImageDrawable(cachedKanaDrawable)
             }
             resetFromSelectMode(binding)
+            applyAtokSmallLetterOverride(forceJapanese = true)
             keyMoveCursorRight.setImageDrawable(
                 cachedArrowRightDrawable
             )

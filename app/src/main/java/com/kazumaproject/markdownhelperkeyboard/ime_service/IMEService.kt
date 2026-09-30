@@ -18100,10 +18100,21 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                     }
                 } finally {
                     scheduleSplitPresentation()
+                    applyAtokSmallKeyState(string, mainView)
                 }
             }
         }
 
+    }
+
+    // [atok-style] 末尾がかなでなければ「（）」キー、かなであれば「゛゜小」キーにする
+    private fun applyAtokSmallKeyState(string: String, mainView: MainLayoutBinding) {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return
+        val bracketMode = string.isEmpty() || !string.last().isHiragana()
+        if (!isGojuonSurface()) {
+            mainView.keyboardView.setAtokBracketMode(bracketMode)
+        }
+        floatingKeyboardBinding?.keyboardViewFloating?.setAtokBracketMode(bracketMode)
     }
 
 
@@ -28427,6 +28438,10 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     ) {
         _dakutenPressed.value = true
         englishSpaceKeyPressed.set(false)
+        if (com.kazumaproject.core.atok.AtokStyle.ENABLED) {
+            atokDakutenOrBracket(sb, insertString, gestureType)
+            return
+        }
         if (insertString.isNotEmpty()) {
             val insertPosition = insertString.last()
             insertPosition.let { c ->
@@ -28473,6 +28488,41 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 switchNextKeyboard()
             }
         }
+    }
+
+    /**
+     * [atok-style] ATOK風の「（）/゛゜小」キー。
+     * 左フリックは常に「)」。末尾がかな以外（未入力を含む）ならタップで「(」。
+     * 末尾がかなならタップ=濁点・半濁点・小文字の順送り、上=濁点、右=半濁点、下=小文字。
+     */
+    private fun atokDakutenOrBracket(
+        sb: StringBuilder, insertString: String, gestureType: GestureType
+    ) {
+        if (gestureType == GestureType.FlickLeft) {
+            sendAtokBracketChar(')', insertString, sb)
+            return
+        }
+        val last = insertString.lastOrNull()
+        if (last == null || !last.isHiragana()) {
+            if (gestureType == GestureType.Tap) {
+                sendAtokBracketChar('(', insertString, sb)
+            }
+            return
+        }
+        val converted = when (gestureType) {
+            GestureType.Tap -> last.getDakutenSmallChar()
+            GestureType.FlickTop -> last.getDakutenFlickLeft()
+            GestureType.FlickRight -> last.getDakutenFlickRight()
+            GestureType.FlickBottom -> last.getDakutenFlickTop()
+            else -> null
+        }
+        converted?.let { setStringBuilderForConvertStringInHiragana(it, sb, insertString) }
+    }
+
+    private fun sendAtokBracketChar(c: Char, insertString: String, sb: StringBuilder) {
+        sendCharFlick(charToSend = c, insertString = insertString, sb = sb)
+        isContinuousTapInputEnabled.set(true)
+        lastFlickConvertedNextHiragana.set(true)
     }
 
     private fun dakutenSmallLetterFloating(
