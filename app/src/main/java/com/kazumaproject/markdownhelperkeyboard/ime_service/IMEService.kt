@@ -10431,6 +10431,9 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                     cancelOngoingLongPressForKey(key)
                 }
             })
+            if (com.kazumaproject.core.atok.AtokStyle.ENABLED) {
+                setOnAtokDeleteSlideListener { action -> handleAtokDeleteSlide(action) }
+            }
             setOnFlickListener(object : FlickListener {
                 override fun onFlick(gestureType: GestureType, key: Key, char: Char?) {
                     if (isKeyboardLayoutEditModeActive()) return
@@ -26763,6 +26766,77 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         }
     }
 
+    /** [atok-style] 削除キーの2段スライドの実行 **/
+    private fun handleAtokDeleteSlide(action: com.kazumaproject.core.atok.AtokDeleteSlideAction) {
+        if (isKeyboardLayoutEditModeActive()) return
+        stopDeleteLongPress()
+        val insertString = inputString.value
+        when (action) {
+            com.kazumaproject.core.atok.AtokDeleteSlideAction.WORD_BEFORE ->
+                deleteWordOrSymbolsBeforeCursor(insertString)
+
+            com.kazumaproject.core.atok.AtokDeleteSlideAction.ALL_BEFORE ->
+                atokDeleteAllBeforeCursor(insertString)
+
+            com.kazumaproject.core.atok.AtokDeleteSlideAction.FORWARD_ONE ->
+                handleDeleteAfterCursor()
+
+            com.kazumaproject.core.atok.AtokDeleteSlideAction.ALL_AFTER ->
+                atokDeleteAllAfterCursor(insertString)
+        }
+    }
+
+    /** [atok-style] カーソルより前をすべて削除（入力中なら入力中の文字列だけを消す） **/
+    private fun atokDeleteAllBeforeCursor(insertString: String) {
+        invalidateZeroQueryForEditorMutation()
+        val inputConnection = currentInputConnection ?: return
+        if (isHenkan.get()) return
+        if (stringInTail.get().isNotEmpty()) return
+        if (insertString.isNotEmpty()) {
+            _inputString.update { "" }
+            setComposingText("", 0)
+            finishComposingText()
+            return
+        }
+        scope.launch {
+            val textBeforeCursor = editorConnectionReadMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    inputConnection.getTextBeforeCursor(ATOK_DELETE_ALL_MAX_CHARS, 0)
+                        ?.toString().orEmpty()
+                }
+            }
+            if (currentInputConnection !== inputConnection || isHenkan.get()) return@launch
+            if (textBeforeCursor.isEmpty()) return@launch
+            inputConnection.deleteSurroundingText(textBeforeCursor.length, 0)
+            pushEditHistoryEntry(EditHistoryEntry.DeleteCommittedText(textBeforeCursor))
+        }
+    }
+
+    /** [atok-style] カーソルより後をすべて削除（入力中は何もしない） **/
+    private fun atokDeleteAllAfterCursor(insertString: String) {
+        invalidateZeroQueryForEditorMutation()
+        val inputConnection = currentInputConnection ?: return
+        if (isHenkan.get()) return
+        if (insertString.isNotEmpty() || stringInTail.get().isNotEmpty()) return
+        scope.launch {
+            val textAfterCursor = editorConnectionReadMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    inputConnection.getTextAfterCursor(ATOK_DELETE_ALL_MAX_CHARS, 0)
+                        ?.toString().orEmpty()
+                }
+            }
+            if (currentInputConnection !== inputConnection || isHenkan.get()) return@launch
+            if (textAfterCursor.isEmpty()) return@launch
+            inputConnection.deleteSurroundingText(0, textAfterCursor.length)
+            pushEditHistoryEntry(
+                EditHistoryEntry.DeleteCommittedText(
+                    deletedText = textAfterCursor,
+                    direction = DeleteDirection.AfterCursor
+                )
+            )
+        }
+    }
+
     private fun deleteLongPress() {
         invalidateZeroQueryForEditorMutation()
         if (isKeyboardLayoutEditModeActive()) return
@@ -29634,3 +29708,6 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         refreshPhysicalKeyboardConnectionState()
     }
 }
+
+// [atok-style] 左全削除・右全削除で一度に読み取る最大文字数
+private const val ATOK_DELETE_ALL_MAX_CHARS = 10_000

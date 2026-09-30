@@ -277,6 +277,11 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         )
     }
 
+    // [atok-style] 削除キーの2段スライド
+    private var atokDeleteSlideListener: ((com.kazumaproject.core.atok.AtokDeleteSlideAction) -> Unit)? = null
+    private var atokDeleteSlideAction: com.kazumaproject.core.atok.AtokDeleteSlideAction? = null
+    private var atokDeleteSlidePopup: PopupWindow? = null
+
     private val cachedContentCopyDrawable: Drawable? by lazy {
         ContextCompat.getDrawable(
             context,
@@ -1377,6 +1382,117 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         this.flickListener = flickListener
     }
 
+    /** [atok-style] 設定すると削除キーがATOK風の2段スライドになる（null で本家の挙動） **/
+    fun setOnAtokDeleteSlideListener(
+        listener: ((com.kazumaproject.core.atok.AtokDeleteSlideAction) -> Unit)?
+    ) {
+        this.atokDeleteSlideListener = listener
+    }
+
+    /**
+     * [atok-style] ACTION_MOVE 中の削除キー。キー1個分ずつの移動量で段階を決める。
+     * 左: 半キー超で「文(単語)削除」、1.5キー超で「左全削除」
+     * 上: 半キー超で「Delete」、1.5キー超で「右全削除」
+     * 削除キーを扱った場合は true を返し、通常のフリック処理を行わない。
+     */
+    private fun handleAtokDeleteSlideMove(event: MotionEvent): Boolean {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return false
+        if (atokDeleteSlideListener == null) return false
+        if (pressedKey.key != Key.SideKeyDelete || isLongPressed) return false
+        if (event.pointerCount != 1) return false
+        val (x, y) = getRawCoordinates(event, 0)
+        val keyW = binding.keyDelete.width.coerceAtLeast(1).toFloat()
+        val keyH = binding.keyDelete.height.coerceAtLeast(1).toFloat()
+        val toLeft = (pressedKey.initialX - x) / keyW
+        val toUp = (pressedKey.initialY - y) / keyH
+        val isLeft = toLeft >= toUp
+        val amount = if (isLeft) toLeft else toUp
+        val stage = when {
+            amount < 0.5f -> 0
+            amount < 1.5f -> 1
+            else -> 2
+        }
+        val action = when {
+            stage == 0 -> null
+            isLeft && stage == 1 -> com.kazumaproject.core.atok.AtokDeleteSlideAction.WORD_BEFORE
+            isLeft -> com.kazumaproject.core.atok.AtokDeleteSlideAction.ALL_BEFORE
+            stage == 1 -> com.kazumaproject.core.atok.AtokDeleteSlideAction.FORWARD_ONE
+            else -> com.kazumaproject.core.atok.AtokDeleteSlideAction.ALL_AFTER
+        }
+        if (action != null) {
+            longPressJob?.cancel()
+            binding.keyDelete.isPressed = true
+            if (action != atokDeleteSlideAction) {
+                showAtokDeleteSlidePopup(action, stage, isLeft)
+            }
+        } else {
+            hideAtokDeleteSlidePopup()
+        }
+        atokDeleteSlideAction = action
+        return true
+    }
+
+    private fun showAtokDeleteSlidePopup(
+        action: com.kazumaproject.core.atok.AtokDeleteSlideAction,
+        stage: Int,
+        isLeft: Boolean
+    ) {
+        val anchor = binding.keyDelete
+        val w = anchor.width
+        val h = anchor.height
+        if (w <= 0 || h <= 0) return
+        val popup = atokDeleteSlidePopup ?: PopupWindow(context).also { p ->
+            val density = resources.displayMetrics.density
+            p.contentView = android.widget.TextView(context).apply {
+                gravity = android.view.Gravity.CENTER
+                setTextColor(Color.WHITE)
+                textSize = 13f
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 10f * density
+                    setColor(0xE6303134.toInt())
+                }
+            }
+            p.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            p.isClippingEnabled = false
+            p.isTouchable = false
+            p.isFocusable = false
+            p.elevation = 8f * density
+            atokDeleteSlidePopup = p
+        }
+        (popup.contentView as? android.widget.TextView)?.text = action.label
+        val xOff = if (isLeft) -stage * w else 0
+        val yOff = if (isLeft) -h else -(stage + 1) * h
+        if (popup.isShowing) {
+            popup.update(anchor, xOff, yOff, w, h)
+        } else {
+            popup.width = w
+            popup.height = h
+            runCatching { popup.showAsDropDown(anchor, xOff, yOff) }
+        }
+    }
+
+    private fun hideAtokDeleteSlidePopup() {
+        atokDeleteSlidePopup?.let { if (it.isShowing) runCatching { it.dismiss() } }
+    }
+
+    /** [atok-style] ACTION_UP 時の削除キー処理。処理した場合は true **/
+    private fun handleAtokDeleteSlideUp(event: MotionEvent): Boolean {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return false
+        val listener = atokDeleteSlideListener ?: return false
+        if (pressedKey.key != Key.SideKeyDelete) return false
+        if (pressedKey.pointer != event.getPointerId(event.actionIndex)) return false
+        val action = atokDeleteSlideAction
+        atokDeleteSlideAction = null
+        hideAtokDeleteSlidePopup()
+        if (action != null) {
+            listener(action)
+        } else {
+            // スライドしなかった（またはキーに戻した）場合は通常の Backspace
+            dispatchResolvedGesture(Key.SideKeyDelete, GestureType.Tap)
+        }
+        return true
+    }
+
     fun setOnFlickTextPreviewListener(listener: FlickTextPreviewListener?) {
         flickTextPreviewEmitter.listener = listener
     }
@@ -1495,6 +1611,7 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
                     val (initialX, initialY) = getRawCoordinates(event, event.actionIndex)
                     pressedKey = PressedKey(key = key, pointer = 0, initialX = initialX, initialY = initialY)
+                    atokDeleteSlideAction = null
 
                     if (isCursorMode) {
                         flickTextPreviewEmitter.cancel()
@@ -1534,6 +1651,12 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
                         }
                         handleCurrentInputModeSwitch(currentInputMode.value)
                         isCursorMode = false
+                        return false
+                    }
+
+                    if (handleAtokDeleteSlideUp(event)) {
+                        resetAllKeys()
+                        popupWindowActive.hide()
                         return false
                     }
 
@@ -1609,6 +1732,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
 
                         return true
                     }
+
+                    if (handleAtokDeleteSlideMove(event)) return false
 
                     val gestureType = if (event.pointerCount == 1) {
                         getGestureType(event, 0)
@@ -1721,6 +1846,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     private fun cancelActiveTouch(reason: KeyTouchCancelReason) {
+        atokDeleteSlideAction = null
+        hideAtokDeleteSlidePopup()
         skinGuide?.dismiss()
         skinLongPress.clear()
         flickTextPreviewEmitter.cancel()
