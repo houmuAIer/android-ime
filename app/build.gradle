@@ -93,6 +93,11 @@ android {
     }
 
     buildTypes {
+        // [atok-style] Play版スミレと共存させるため、デバッグビルドはアプリIDを分ける
+        debug {
+            applicationIdSuffix ".inoue"
+            versionNameSuffix "-inoue"
+        }
         release {
             def releaseSigning = signingConfigs.findByName("release")
             if (releaseSigning?.storeFile) {
