@@ -394,35 +394,36 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     }
 
     // [atok-style] かなキーの数字・英字表示（例: 2 / ABC）
-    private var atokKeyHints: List<Pair<AppCompatButton, com.kazumaproject.tenkey.view.AtokKeyHintDrawable>>? = null
+    private var atokKeyHintLayer: com.kazumaproject.tenkey.view.AtokKeyHintLayer? = null
 
     private fun atokSetKeyHintsVisible(visible: Boolean) {
         if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return
-        val hints = atokKeyHints ?: run {
-            val spec = binding.run {
-                listOf(
-                    key1 to ("1" to "@#/_"), key2 to ("2" to "ABC"), key3 to ("3" to "DEF"),
-                    key4 to ("4" to "GHI"), key5 to ("5" to "JKL"), key6 to ("6" to "MNO"),
-                    key7 to ("7" to "PQRS"), key8 to ("8" to "TUV"), key9 to ("9" to "WXYZ"),
-                    key11 to ("0" to ""), key12 to ("#" to ""),
-                )
-            }
-            spec.map { (button, texts) ->
-                val drawable = com.kazumaproject.tenkey.view.AtokKeyHintDrawable(
-                    button, texts.first, texts.second
-                )
-                drawable.setBounds(0, 0, button.width, button.height)
-                button.overlay.add(drawable)
-                button.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
-                    drawable.setBounds(0, 0, v.width, v.height)
+        val layer = atokKeyHintLayer ?: com.kazumaproject.tenkey.view.AtokKeyHintLayer(context).also { l ->
+            l.setHints(
+                binding.run {
+                    listOf(
+                        Triple(key1, "1", "@#/_"), Triple(key2, "2", "ABC"), Triple(key3, "3", "DEF"),
+                        Triple(key4, "4", "GHI"), Triple(key5, "5", "JKL"), Triple(key6, "6", "MNO"),
+                        Triple(key7, "7", "PQRS"), Triple(key8, "8", "TUV"), Triple(key9, "9", "WXYZ"),
+                        Triple(key11, "0", ""), Triple(key12, "#", ""),
+                    )
                 }
-                button to drawable
-            }.also { atokKeyHints = it }
+            )
+            l.elevation = 30f * resources.displayMetrics.density
+            l.isClickable = false
+            l.isFocusable = false
+            val lp = ConstraintLayout.LayoutParams(0, 0).apply {
+                startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+                endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+                topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+                bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+            }
+            addView(l, lp)
+            addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> l.invalidate() }
+            atokKeyHintLayer = l
         }
-        hints.forEach { (button, drawable) ->
-            drawable.alpha = if (visible) 255 else 0
-            button.invalidate()
-        }
+        layer.visibility = if (visible) View.VISIBLE else View.GONE
+        layer.invalidate()
     }
 
     // [atok-style] 絵文字キーからのスワイプ入力

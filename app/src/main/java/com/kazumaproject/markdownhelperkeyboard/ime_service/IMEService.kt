@@ -11257,7 +11257,10 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             Key.NotSelected -> {}
             Key.SideKeyEnter -> {}
             Key.KeyDakutenSmall -> {
-                if (tenkeyShowIMEButtonPreference == true) {
+                // [atok-style] （）キーの長押しでキーボード切替メニューを出さない
+                if (!com.kazumaproject.core.atok.AtokStyle.ENABLED &&
+                    tenkeyShowIMEButtonPreference == true
+                ) {
                     showListPopup()
                 }
             }
@@ -11307,7 +11310,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             Key.NotSelected -> {}
             Key.SideKeyEnter -> {}
             Key.KeyDakutenSmall -> {
-                showListPopup()
+                if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) showListPopup()
             }
 
             Key.SideKeyCursorLeft -> {
@@ -26880,7 +26883,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                 .filter { it.mode == SymbolMode.EMOJI }
                 .sortedByDescending { it.timestamp }
                 .map { it.symbol }
-            val items = (history + ATOK_DEFAULT_SWIPE_EMOJIS).distinct().take(15)
+            val items = (history + ATOK_DEFAULT_SWIPE_EMOJIS).distinct()
+                .take(com.kazumaproject.tenkey.view.AtokEmojiSwipePanel.MAX_ITEMS)
             withContext(Dispatchers.Main) {
                 mainLayoutBinding?.keyboardView?.setAtokEmojiSwipeItems(items)
             }
@@ -29837,5 +29841,7 @@ private const val ATOK_DELETE_ALL_MAX_CHARS = 10_000
 private val ATOK_DEFAULT_SWIPE_EMOJIS = listOf(
     "😊", "😂", "🙏", "👍", "🙇", "😭", "🤔", "😅",
     "✨", "🎉", "💦", "❤️", "👏", "🙌", "😍", "😢",
-    "😆", "🥺", "👀", "💪", "🔥", "⭐", "🍺",
+    "😆", "🥺", "👀", "💪", "🔥", "⭐", "🍺", "🙆",
+    "🙅", "😉", "😎", "🥳", "😴", "😇", "🤣", "😋",
+    "😳", "💯", "🎂", "🌸", "☀️", "🍣", "🚃", "📝",
 )

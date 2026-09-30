@@ -9,6 +9,8 @@ object LearningEligibilityPolicy {
         allowJapaneseWithSymbolsAndNumbers: Boolean,
     ): Boolean {
         if (input.isBlank() || output.isBlank()) return false
+        // [atok-style] ATOKと同じく、記号だけ・数字だけの変換（てん→・ など）も学習する
+        if (com.kazumaproject.core.atok.AtokStyle.ENABLED) return true
         if (!output.containsSymbolNumberOrEmoji()) return true
         if (!allowJapaneseWithSymbolsAndNumbers) return false
 
