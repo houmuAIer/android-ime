@@ -27169,7 +27169,8 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                         restoreRawInputFromBunsetsuSession()
                         hasConvertedKatakana = isLiveConversionEnable == true
                         resetFlagsDeleteKey()
-                    } else if (deleteKeyHighLight == true) {
+                    } else if (deleteKeyHighLight == true && !com.kazumaproject.core.atok.AtokStyle.ENABLED) {
+                        // [atok-style] ATOKと同じく、変換中の削除キーは読みに戻す（下の else）
                         handleDeleteKeyInHenkan(suggestions, insertString)
                     } else {
                         cancelHenkanByLongPressDeleteKey()
