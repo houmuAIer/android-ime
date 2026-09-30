@@ -3977,28 +3977,52 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     }
 
     /**
-     * [atok-style] ATOKと同じく「前に選んだ候補」を最優先にする。
-     * 読み全体に対して学習済みの変換結果が候補に含まれていれば、最後に使った順に先頭へ移す。
-     * （本家の学習は変換の重み付けに使われるだけで、記号候補などは先頭に来ないことがあるため）
+     * [atok-style] ATOKと同じく「前に選んだ候補」「ユーザー辞書の単語」を先頭に出す。
+     * 読み全体が一致する学習済みの変換結果（最後に使った順）→ ユーザー辞書の単語 の順で先頭へ移す。
+     * 候補一覧に無ければ新しく差し込む（本家は短い読みで学習・辞書を引かないことがあるため）。
      */
     private suspend fun atokPromoteLearnedCandidates(
         input: String,
         candidates: List<Candidate>,
     ): List<Candidate> {
         if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return candidates
-        if (input.isEmpty() || candidates.isEmpty()) return candidates
-        val repository = learnedRepositoryForSuggestion() ?: return candidates
-        val learnedOutputs = runCatching { repository.findExactMatchesForConversion(input) }
-            .getOrDefault(emptyList())
-            .sortedWith(compareByDescending<com.kazumaproject.markdownhelperkeyboard.learning.database.LearnEntity> { it.lastUsedAt }.thenByDescending { it.usageCount })
-            .map { it.out }
-            .distinct()
-        if (learnedOutputs.isEmpty()) return candidates
-        val promoted = learnedOutputs.mapNotNull { out ->
-            candidates.firstOrNull { it.string == out && it.length.toInt() == input.length }
+        if (input.isEmpty()) return candidates
+        val learnedOutputs = learnedRepositoryForSuggestion()?.let { repository ->
+            runCatching { repository.findExactMatchesForConversion(input) }
+                .getOrDefault(emptyList())
+                .sortedWith(
+                    compareByDescending<com.kazumaproject.markdownhelperkeyboard.learning.database.LearnEntity> { it.lastUsedAt }
+                        .thenByDescending { it.usageCount }
+                )
+                .map { it.out }
+        }.orEmpty()
+        val userWords = if (isUserDictionaryEnable == true) {
+            runCatching {
+                userDictionaryRepository.searchByReadingPrefixSuspend(prefix = input, limit = 20)
+            }.getOrDefault(emptyList())
+                .filter { it.reading == input }
+                .map { it.word }
+        } else {
+            emptyList()
         }
-        if (promoted.isEmpty()) return candidates
-        return promoted + candidates.filterNot { candidate -> promoted.any { it === candidate } }
+        val preferred = (learnedOutputs + userWords).filter { it.isNotEmpty() }.distinct()
+        if (preferred.isEmpty()) return candidates
+        val promoted = preferred.map { out ->
+            candidates.firstOrNull { it.string == out && it.length.toInt() == input.length }
+                ?: Candidate(
+                    string = out,
+                    type = if (out in userWords && out !in learnedOutputs) {
+                        CANDIDATE_TYPE_USER_DICTIONARY
+                    } else {
+                        (1).toByte()
+                    },
+                    length = input.length.toUByte(),
+                    score = 0,
+                )
+        }
+        return promoted + candidates.filterNot { candidate ->
+            promoted.any { it === candidate || (it.string == candidate.string && it.length == candidate.length) }
+        }
     }
 
     private fun learnedRepositoryForSuggestion(): LearnRepository? {
