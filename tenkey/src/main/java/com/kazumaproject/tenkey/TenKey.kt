@@ -284,6 +284,47 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
     private var atokDeleteSlideLabel: android.widget.TextView? = null
     private var atokDeleteIconChanged = false
 
+    // [atok-style] 左下キー: 未入力=絵文字・記号、入力中=カナ英数、確定直後=後変換
+    private var atokSymbolKeyState = com.kazumaproject.core.atok.AtokSymbolKeyState.DEFAULT
+    private var atokSymbolKeyOverridden = false
+    private val atokKanaEisuDrawable by lazy { createAtokTextDrawable("カナ英数") }
+    private val atokReconvertDrawable by lazy { createAtokTextDrawable("後変換") }
+
+    private fun createAtokTextDrawable(text: String): com.kazumaproject.tenkey.view.AtokTextDrawable {
+        return com.kazumaproject.tenkey.view.AtokTextDrawable(
+            text = text,
+            textSizePx = 14f * resources.displayMetrics.scaledDensity,
+            fallbackColor = ContextCompat.getColor(
+                context,
+                com.kazumaproject.core.R.color.keyboard_icon_color
+            )
+        )
+    }
+
+    fun setAtokSymbolKeyState(state: com.kazumaproject.core.atok.AtokSymbolKeyState) {
+        atokSymbolKeyState = state
+        applyAtokSymbolKeyOverride()
+    }
+
+    private fun applyAtokSymbolKeyOverride(forceJapanese: Boolean = false) {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return
+        if (isCursorMode) return
+        val isJapanese = forceJapanese || currentInputMode.value == InputMode.ModeJapanese
+        val drawable = when {
+            !isJapanese -> null
+            atokSymbolKeyState == com.kazumaproject.core.atok.AtokSymbolKeyState.KANA_EISU -> atokKanaEisuDrawable
+            atokSymbolKeyState == com.kazumaproject.core.atok.AtokSymbolKeyState.RECONVERT -> atokReconvertDrawable
+            else -> null
+        }
+        if (drawable != null) {
+            binding.sideKeySymbolModeContainer.setSymbolImageDrawable(drawable)
+            atokSymbolKeyOverridden = true
+        } else if (atokSymbolKeyOverridden) {
+            binding.sideKeySymbolModeContainer.setSymbolImageDrawable(cachedSymbolDrawable)
+            atokSymbolKeyOverridden = false
+        }
+    }
+
     private val cachedContentCopyDrawable: Drawable? by lazy {
         ContextCompat.getDrawable(
             context,
@@ -2946,6 +2987,8 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
             }
             resetFromSelectMode(binding)
             applyAtokSmallLetterOverride(forceJapanese = true)
+            atokSymbolKeyOverridden = false
+            applyAtokSymbolKeyOverride(forceJapanese = true)
             keyMoveCursorRight.setImageDrawable(
                 cachedArrowRightDrawable
             )

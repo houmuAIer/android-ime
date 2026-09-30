@@ -4370,7 +4370,25 @@ class KanaKanjiEngine {
             digitCandidates + numberUnitCandidates + (englishDeferred + englishZenkaku).sortedBy { it.score }
         val temporalCandidates = createTemporalDictionaryCandidates(input)
 
-        return listJapaneseCandidates + numbersConverted + temporalCandidates
+        val sumireCandidates = listJapaneseCandidates + numbersConverted + temporalCandidates
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return sumireCandidates
+        // [atok-style] ATOK風のカナ英数候補（キー数字・英字・時刻、全角/半角）を先頭に置く
+        val atokCandidates = com.kazumaproject.markdownhelperkeyboard.atok.AtokEisuKanaCore
+            .candidateStrings(
+                input = input,
+                english = { it.replaceJapaneseCharactersForEnglish() },
+                katakana = { it.hiraToKata() },
+                halfKatakana = { it.toHankakuKatakana() },
+            )
+            .map { text ->
+                Candidate(
+                    string = text,
+                    type = (1).toByte(),
+                    length = input.length.toUByte(),
+                    score = 3000
+                )
+            }
+        return (atokCandidates + sumireCandidates).distinctBy { it.string }
     }
 
     private fun createTemporalDictionaryCandidates(input: String): List<Candidate> = when (input) {

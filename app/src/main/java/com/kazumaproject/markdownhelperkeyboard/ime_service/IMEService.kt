@@ -1082,6 +1082,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             }
             return
         }
+        updateAtokSymbolKeyState()
 
         // CandidateShowFlag.Updating can be emitted once with an empty input while the
         // editor/IME is being recreated (for example, after hiding and showing the keyboard).
@@ -10876,13 +10877,19 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             }
 
             Key.SideKeySymbol -> {
-                vibrate()
-                _keyboardSymbolViewState.value = SymbolKeyboardState(
-                    isShown = !_keyboardSymbolViewState.value.isShown
-                )
-                stringInTail.set("")
-                finishComposingText()
-                setComposingText("", 0)
+                if (com.kazumaproject.core.atok.AtokStyle.ENABLED &&
+                    handleAtokSymbolKey(insertString, mainView)
+                ) {
+                    // [atok-style] カナ英数・後変換として処理済み
+                } else {
+                    vibrate()
+                    _keyboardSymbolViewState.value = SymbolKeyboardState(
+                        isShown = !_keyboardSymbolViewState.value.isShown
+                    )
+                    stringInTail.set("")
+                    finishComposingText()
+                    setComposingText("", 0)
+                }
             }
 
             else -> {
@@ -18118,6 +18125,52 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             mainView.keyboardView.setAtokBracketMode(bracketMode)
         }
         floatingKeyboardBinding?.keyboardViewFloating?.setAtokBracketMode(bracketMode)
+        updateAtokSymbolKeyState()
+    }
+
+    /** [atok-style] 左下キーの表示（絵文字・記号／カナ英数／後変換）を更新する **/
+    private fun updateAtokSymbolKeyState() {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return
+        val mainView = mainLayoutBinding ?: return
+        if (isGojuonSurface()) return
+        val state = when {
+            inputString.value.isNotEmpty() -> com.kazumaproject.core.atok.AtokSymbolKeyState.KANA_EISU
+            shouldShowReconversionButton() -> com.kazumaproject.core.atok.AtokSymbolKeyState.RECONVERT
+            else -> com.kazumaproject.core.atok.AtokSymbolKeyState.DEFAULT
+        }
+        mainView.keyboardView.setAtokSymbolKeyState(state)
+    }
+
+    /**
+     * [atok-style] 左下キーが押されたとき。入力中ならカナ英数候補を出し、
+     * 確定直後で再変換できるなら後変換する。処理した場合は true。
+     */
+    private fun handleAtokSymbolKey(insertString: String, mainView: MainLayoutBinding): Boolean {
+        if (isGojuonSurface()) return false
+        if (mainView.keyboardView.currentInputMode.value != InputMode.ModeJapanese) return false
+        if (insertString.isNotEmpty()) {
+            vibrate()
+            val mode = CandidateQueryMode.EISUKANA
+            val token = candidateRequestTracker.begin(
+                input = insertString,
+                mode = mode,
+                backend = conversionBackend,
+                editorMutationRevision = editorMutationRevision.current(),
+            )
+            ioScope.launch {
+                setCandidatesForMode(insertString, mainView, mode, token)
+                withContext(Dispatchers.Main) {
+                    hideFirstRowCandidatesInFullScreen(mainView)
+                }
+            }
+            return true
+        }
+        if (shouldShowReconversionButton()) {
+            vibrate()
+            performPendingReconversion()
+            return true
+        }
+        return false
     }
 
 
