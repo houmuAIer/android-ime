@@ -4376,7 +4376,10 @@ class KanaKanjiEngine {
         val atokCandidates = com.kazumaproject.markdownhelperkeyboard.atok.AtokEisuKanaCore
             .candidateStrings(
                 input = input,
-                english = { it.replaceJapaneseCharactersForEnglish() },
+                english = {
+                    com.kazumaproject.markdownhelperkeyboard.atok.AtokTenkeyAlphabet.toEnglish(it)
+                        ?: it.replaceJapaneseCharactersForEnglish()
+                },
                 katakana = { it.hiraToKata() },
                 halfKatakana = { it.toHankakuKatakana() },
             )
