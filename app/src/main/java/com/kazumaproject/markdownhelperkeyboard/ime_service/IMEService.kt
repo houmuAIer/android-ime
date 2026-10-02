@@ -10834,6 +10834,13 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             Key.SideKeyCursorLeft -> {
                 if (!leftCursorKeyLongKeyPressed.get()) {
                     if (moveFocusedBunsetsuSegment(delta = -1)) {
+                    } else if (isHenkan.get() &&
+                        com.kazumaproject.core.atok.AtokStyle.ENABLED &&
+                        insertString.length > 1
+                    ) {
+                        // [atok-style] 変換中の←: 変換する範囲を1文字縮める（残りは後で変換）
+                        atokCancelHenkanKeepingTail()
+                        handleLeftCursor(gestureType, insertString)
                     } else if (isHenkan.get()) {
                         handleDeleteKeyInHenkan(suggestions, insertString)
                     } else {
@@ -10846,6 +10853,13 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             Key.SideKeyCursorRight -> {
                 if (!rightCursorKeyLongKeyPressed.get()) {
                     if (moveFocusedBunsetsuSegment(delta = 1)) {
+                    } else if (isHenkan.get() &&
+                        com.kazumaproject.core.atok.AtokStyle.ENABLED &&
+                        stringInTail.get().isNotEmpty()
+                    ) {
+                        // [atok-style] 変換中の→: 変換する範囲を1文字伸ばす
+                        atokCancelHenkanKeepingTail()
+                        actionInRightKeyPressed(gestureType, insertString)
                     } else if (isHenkan.get()) {
                         handleJapaneseModeSpaceKey(
                             mainView, suggestions, insertString
@@ -16620,6 +16634,17 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
 
             else -> false
         }
+    }
+
+    /**
+     * [atok-style] 変換を取り消して読みに戻す（残りの未変換部分 stringInTail は保つ）。
+     * 本家の取り消し処理は長押し削除用の状態を立てるので、直後の削除キーが効くよう戻しておく。
+     */
+    private fun atokCancelHenkanKeepingTail() {
+        val tail = stringInTail.get()
+        cancelHenkanByLongPressDeleteKey()
+        deleteKeyLongKeyPressed.set(false)
+        if (stringInTail.get().isEmpty() && tail.isNotEmpty()) stringInTail.set(tail)
     }
 
     private fun cancelHenkanByLongPressDeleteKey() {
