@@ -4386,7 +4386,7 @@ class KanaKanjiEngine {
             .map { text ->
                 Candidate(
                     string = text,
-                    type = (1).toByte(),
+                    type = com.kazumaproject.markdownhelperkeyboard.converter.candidate.CANDIDATE_TYPE_ATOK_EISU,
                     length = input.length.toUByte(),
                     score = 3000
                 )

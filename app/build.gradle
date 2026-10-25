@@ -46,6 +46,9 @@ android {
     productFlavors {
         full {
             dimension "edition"
+            // [atok-style] AI変換入りの通常版でも、これまでの開発版（Lite）と同じアプリIDにして
+            // 上書きインストールできるようにする（ユーザー辞書・学習を引き継ぐため）
+            applicationIdSuffix ".lite"
             buildConfigField "boolean", "HAS_ZENZ", "true"
             buildConfigField "boolean", "HAS_GEMMA", "true"
             buildConfigField "String", "APP_EDITION", "\"full\""

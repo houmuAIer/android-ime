@@ -4005,7 +4005,15 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         } else {
             emptyList()
         }
-        val preferred = (learnedOutputs + userWords).filter { it.isNotEmpty() }.distinct()
+        // カナ英数（123・ADG・時刻・日付など）は学習・優先表示の対象にしない。
+        // 以前に学習してしまったものはここで学習辞書から消す
+        val eisuOutputs = com.kazumaproject.markdownhelperkeyboard.atok.AtokEisuCandidates.all(input)
+        learnedOutputs.filter { it in eisuOutputs }.forEach { out ->
+            runCatching { learnRepository.deleteByInputAndOutput(input, out) }
+        }
+        val preferred = (learnedOutputs.filterNot { it in eisuOutputs } + userWords)
+            .filter { it.isNotEmpty() }
+            .distinct()
         if (preferred.isEmpty()) return candidates
         val promoted = preferred.map { out ->
             candidates.firstOrNull { it.string == out && it.length.toInt() == input.length }
@@ -10488,6 +10496,15 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
                     if (!isKeyboardLayoutEditModeActive()) {
                         vibrate()
                         _keyboardSymbolViewState.value = SymbolKeyboardState(isShown = true)
+                    }
+                }
+                setOnAtokClipboardPageListener {
+                    if (!isKeyboardLayoutEditModeActive()) {
+                        vibrate()
+                        _keyboardSymbolViewState.value = SymbolKeyboardState(
+                            isShown = true,
+                            mode = SymbolMode.CLIPBOARD
+                        )
                     }
                 }
                 refreshAtokEmojiSwipeItems()
@@ -18206,6 +18223,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
     private fun applyAtokSmallKeyState(string: String, mainView: MainLayoutBinding) {
         if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return
         val bracketMode = string.isEmpty() || !string.last().isHiragana()
+        if (string.isEmpty()) mainView.keyboardView.hideAtokEisuPopup()
         if (!isGojuonSurface()) {
             mainView.keyboardView.setAtokBracketMode(bracketMode)
         }
@@ -18234,23 +18252,34 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         if (mainView.keyboardView.currentInputMode.value != InputMode.ModeJapanese) return false
         if (insertString.isNotEmpty()) {
             vibrate()
-            val mode = CandidateQueryMode.EISUKANA
-            val token = candidateRequestTracker.begin(
-                input = insertString,
-                mode = mode,
-                backend = conversionBackend,
-                editorMutationRevision = editorMutationRevision.current(),
-            )
-            ioScope.launch {
-                setCandidatesForMode(insertString, mainView, mode, token)
-                withContext(Dispatchers.Main) {
-                    hideFirstRowCandidatesInFullScreen(mainView)
-                }
+            // ATOKと同じく、通常の候補欄ではなくポップアップ（半角／全角タブ）で出す
+            val (half, full) =
+                com.kazumaproject.markdownhelperkeyboard.atok.AtokEisuCandidates.popup(insertString)
+            mainView.keyboardView.showAtokEisuPopup(half, full) { text ->
+                atokCommitEisuCandidate(text, mainView)
             }
             return true
         }
         // 後変換は使わない（確定後は常に絵文字・記号キー）
         return false
+    }
+
+    /** [atok-style] カナ英数ポップアップで選んだ文字を、学習せずに確定する **/
+    private fun atokCommitEisuCandidate(text: String, mainView: MainLayoutBinding) {
+        val input = inputString.value
+        if (input.isEmpty() || text.isEmpty()) return
+        setCandidateClick(
+            candidate = Candidate(
+                string = text,
+                type = com.kazumaproject.markdownhelperkeyboard.converter.candidate.CANDIDATE_TYPE_ATOK_EISU,
+                length = input.length.toUByte(),
+                score = 0,
+            ),
+            insertString = input,
+            currentInputMode = mainView.keyboardView.currentInputMode.value,
+            position = 0,
+            displayedCandidates = emptyList(),
+        )
     }
 
     /**
@@ -24889,6 +24918,7 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
             14,
             28,
             30,
+            com.kazumaproject.markdownhelperkeyboard.converter.candidate.CANDIDATE_TYPE_ATOK_EISU.toInt(),
             CANDIDATE_TYPE_TIME.toInt(),
             CANDIDATE_TYPE_ERA.toInt(),
             CANDIDATE_TYPE_USER_TEMPLATE.toInt(),

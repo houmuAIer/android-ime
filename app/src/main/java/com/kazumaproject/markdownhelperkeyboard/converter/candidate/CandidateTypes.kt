@@ -12,3 +12,6 @@ const val CANDIDATE_TYPE_UTILITY_LITERAL: Byte = 51
 const val CANDIDATE_TYPE_TEXT_MACRO: Byte = 52
 const val CANDIDATE_TYPE_FORMULA_UNICODE: Byte = 53
 const val CANDIDATE_TYPE_FORMULA_TEX: Byte = 54
+
+/** [atok-style] カナ英数（キー数字・英字・時刻・日付）の候補。学習しない */
+const val CANDIDATE_TYPE_ATOK_EISU: Byte = 97

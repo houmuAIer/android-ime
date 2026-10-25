@@ -426,8 +426,64 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         layer.invalidate()
     }
 
+    // [atok-style] カナ英数ポップアップ
+    private var atokEisuPanel: com.kazumaproject.tenkey.view.AtokEisuPopupPanel? = null
+    private var atokEisuListener: ((String) -> Unit)? = null
+
+    fun showAtokEisuPopup(half: List<String>, full: List<String>, onPick: (String) -> Unit) {
+        if (half.isEmpty() && full.isEmpty()) return
+        atokHideFlickRing()
+        val panel = atokEisuPanel ?: com.kazumaproject.tenkey.view.AtokEisuPopupPanel(context).also { p ->
+            p.elevation = 110f * resources.displayMetrics.density
+            p.isClickable = false
+            p.isFocusable = false
+            val lp = ConstraintLayout.LayoutParams(0, 0).apply {
+                startToStart = ConstraintLayout.LayoutParams.PARENT_ID
+                endToEnd = ConstraintLayout.LayoutParams.PARENT_ID
+                topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+                bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+            }
+            addView(p, lp)
+            atokEisuPanel = p
+        }
+        atokEisuListener = onPick
+        panel.setCandidates(half, full)
+        panel.visibility = View.VISIBLE
+        panel.bringToFront()
+    }
+
+    fun hideAtokEisuPopup() {
+        atokEisuPanel?.visibility = View.GONE
+        atokEisuListener = null
+    }
+
+    fun isAtokEisuPopupShowing(): Boolean = atokEisuPanel?.visibility == View.VISIBLE
+
+    /** [atok-style] ポップアップ表示中のタッチ。指を離した位置で判定する **/
+    private fun handleAtokEisuTouch(event: MotionEvent) {
+        val action = event.action and MotionEvent.ACTION_MASK
+        if (action != MotionEvent.ACTION_UP) return
+        val panel = atokEisuPanel ?: return
+        val (x, y) = getRawCoordinates(event, event.actionIndex)
+        when (val hit = panel.hitAtRaw(x, y)) {
+            is com.kazumaproject.tenkey.view.AtokEisuPopupPanel.Hit.Tab -> panel.selectTab(hit.index)
+            com.kazumaproject.tenkey.view.AtokEisuPopupPanel.Hit.Close -> hideAtokEisuPopup()
+            is com.kazumaproject.tenkey.view.AtokEisuPopupPanel.Hit.Candidate -> {
+                val listener = atokEisuListener
+                hideAtokEisuPopup()
+                listener?.invoke(hit.text)
+            }
+            com.kazumaproject.tenkey.view.AtokEisuPopupPanel.Hit.None -> Unit
+        }
+    }
+
     // [atok-style] 絵文字キーからのスワイプ入力
     private var atokEmojiPageListener: (() -> Unit)? = null
+    private var atokClipboardPageListener: (() -> Unit)? = null
+
+    fun setOnAtokClipboardPageListener(listener: (() -> Unit)?) {
+        atokClipboardPageListener = listener
+    }
 
     fun setOnAtokEmojiPageListener(listener: (() -> Unit)?) {
         atokEmojiPageListener = listener
@@ -510,10 +566,12 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         val cell = panel?.cellAtRaw(x, y) ?: -1
         val emoji = panel?.itemAtCell(cell)
         val openPage = panel?.isEmojiPageCell(cell) == true
+        val openClipboard = panel?.isClipboardCell(cell) == true
         hideAtokEmojiPanel()
         when {
             emoji != null -> atokEmojiListener?.invoke(emoji)
             openPage -> atokEmojiPageListener?.invoke()
+            openClipboard -> atokClipboardPageListener?.invoke()
         }
         return true
     }
@@ -1879,6 +1937,10 @@ class TenKey(context: Context, attributeSet: AttributeSet) :
         if (view != null && event != null) {
             if (view.visibility != View.VISIBLE) {
                 return false
+            }
+            if (isAtokEisuPopupShowing()) {
+                handleAtokEisuTouch(event)
+                return true
             }
             when (event.action and MotionEvent.ACTION_MASK) {
                 MotionEvent.ACTION_DOWN -> {

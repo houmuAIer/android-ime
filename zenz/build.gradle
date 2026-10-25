@@ -112,29 +112,66 @@ android {
     }
 }
 
-def prepareZenzModel = tasks.register("prepareZenzModel", Exec) {
+// [atok-style] 本家は bash + python のスクリプトでモデルを取得するが、Windows の Android Studio では
+// それらが使えないため、Gradle だけで GGUF を直接ダウンロードする（GGUF リポジトリなので変換は不要）。
+def prepareZenzModel = tasks.register("prepareZenzModel") {
     group = "zenz"
     description = "Downloads the Zenz GGUF model from Hugging Face for packaging."
 
     def outputDir = generatedZenzAssetsDir.get().asFile
+    def outputFile = new File(outputDir, zenzModelAssetName.toString())
+    def downloadUrl = "https://huggingface.co/${zenzModelRepo}/resolve/${zenzModelRevision}/${zenzModelAssetName}".toString()
+    def hfToken = zenzModelHfToken.toString()
+    def cacheFile = zenzModelCacheDir ? new File(zenzModelCacheDir.toString(), zenzModelAssetName.toString()) : null
 
     inputs.property("repo", zenzModelRepo)
     inputs.property("revision", zenzModelRevision)
     inputs.property("quantization", zenzModelQuantization)
     inputs.property("assetName", zenzModelAssetName)
-    outputs.file(new File(outputDir, zenzModelAssetName))
+    outputs.file(outputFile)
 
-    commandLine "bash", "${project.projectDir}/scripts/prepare_zenz_model.sh"
-    environment "ZENZ_MODEL_REPO", zenzModelRepo
-    environment "ZENZ_MODEL_REVISION", zenzModelRevision
-    environment "ZENZ_MODEL_QUANTIZATION", zenzModelQuantization
-    environment "ZENZ_MODEL_ASSET_NAME", zenzModelAssetName
-    environment "ZENZ_MODEL_OUTPUT_DIR", outputDir.absolutePath
-    environment "ZENZ_MODEL_WORK_DIR", layout.buildDirectory.dir("intermediates/zenzModel").get().asFile.absolutePath
-    environment "ZENZ_MODEL_HF_TOKEN", zenzModelHfToken
-    environment "ZENZ_LLAMA_CPP_DIR", file("src/main/cpp/llama.cpp").absolutePath
-    if (zenzModelCacheDir) {
-        environment "ZENZ_MODEL_CACHE_DIR", zenzModelCacheDir
+    doLast {
+        outputDir.mkdirs()
+        if (cacheFile != null && cacheFile.isFile() && cacheFile.length() > 0) {
+            java.nio.file.Files.copy(cacheFile.toPath(), outputFile.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            println("Restored Zenz model from cache: ${cacheFile}")
+            return
+        }
+        def tmp = new File(outputDir, outputFile.name + ".part")
+        String url = downloadUrl
+        HttpURLConnection conn = null
+        for (int i = 0; i < 6; i++) {
+            conn = (HttpURLConnection) new URL(url).openConnection()
+            conn.instanceFollowRedirects = false
+            conn.connectTimeout = 30000
+            conn.readTimeout = 120000
+            if (hfToken && url.startsWith("https://huggingface.co/")) {
+                conn.setRequestProperty("Authorization", "Bearer " + hfToken)
+            }
+            int code = conn.responseCode
+            if (code in [301, 302, 303, 307, 308]) {
+                def location = conn.getHeaderField("Location")
+                url = new URL(new URL(url), location).toString()
+                conn.disconnect()
+                continue
+            }
+            if (code != 200) {
+                throw new GradleException("Zenz model download failed: HTTP ${code} ${url}")
+            }
+            break
+        }
+        conn.inputStream.withStream { input ->
+            tmp.withOutputStream { out -> out << input }
+        }
+        java.nio.file.Files.move(tmp.toPath(), outputFile.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        if (cacheFile != null) {
+            cacheFile.parentFile.mkdirs()
+            java.nio.file.Files.copy(outputFile.toPath(), cacheFile.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+        println("Downloaded Zenz model: ${outputFile} (${outputFile.length()} bytes)")
     }
 }
 

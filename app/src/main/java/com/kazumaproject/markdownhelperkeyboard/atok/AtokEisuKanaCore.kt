@@ -53,6 +53,30 @@ object AtokEisuKanaCore {
         return colon + jikan
     }
 
+    private val daysInMonth = intArrayOf(31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+    /**
+     * 3〜4桁の数字列から日付表記を作る（1214 → 12月14日 / 12/14、121 → 1月21日・12月1日）。
+     * 月1〜12・その月にある日（2月は29日まで）の分け方をすべて出す。
+     */
+    fun dateCandidates(digits: String): List<String> {
+        if (digits.length !in 3..4 || !digits.all { it in '0'..'9' }) return emptyList()
+        val kanji = mutableListOf<String>()
+        val slash = mutableListOf<String>()
+        for (split in 1 until digits.length) {
+            val m = digits.substring(0, split)
+            val d = digits.substring(split)
+            if (m.length > 2 || d.length > 2) continue
+            if (m.startsWith("0") || d.startsWith("0")) continue
+            val month = m.toInt()
+            val day = d.toInt()
+            if (month !in 1..12 || day !in 1..daysInMonth[month - 1]) continue
+            kanji.add("${month}月${day}日")
+            slash.add("$month/$day")
+        }
+        return kanji + slash
+    }
+
     private fun String.toFullWidthAscii(): String =
         map { c -> if (c in '!'..'~') (c.code + 0xFEE0).toChar() else c }.joinToString("")
 
@@ -85,11 +109,45 @@ object AtokEisuKanaCore {
             result.add(en.lowercase().toFullWidthAscii())
         }
         if (digits != null) {
-            val times = timeCandidates(digits)
+            val times = timeCandidates(digits) + dateCandidates(digits)
             times.forEach { result.add(it) }
             times.forEach { result.add(it.toFullWidthAscii()) }
         }
         result.remove(input)
         return result.toList()
+    }
+
+    /**
+     * ATOK風のカナ英数ポップアップ用に、半角と全角の候補を分けて返す。
+     * 半角: ｶﾅ / 数字 / 英字(大・小・先頭大) / 時刻 / 日付
+     * 全角: カナ / 数字 / 英字(大・小・先頭大) / 時刻 / 日付
+     */
+    fun popupCandidates(
+        input: String,
+        english: (String) -> String?,
+        katakana: (String) -> String,
+        halfKatakana: (String) -> String,
+    ): Pair<List<String>, List<String>> {
+        if (input.isEmpty()) return emptyList<String>() to emptyList()
+        val half = LinkedHashSet<String>()
+        half.add(halfKatakana(input))
+        val digits = toKeyDigits(input)
+        if (digits != null) half.add(digits)
+        val en = english(input)?.takeIf { it.isNotEmpty() && it.all { c -> c in ' '..'~' } }
+        if (en != null) {
+            half.add(en.uppercase())
+            half.add(en.lowercase())
+            half.add(en.lowercase().replaceFirstChar { it.uppercaseChar() })
+        }
+        if (digits != null) {
+            timeCandidates(digits).forEach { half.add(it) }
+            dateCandidates(digits).forEach { half.add(it) }
+        }
+        val full = LinkedHashSet<String>()
+        full.add(katakana(input))
+        half.drop(1).forEach { full.add(it.toFullWidthAscii()) }
+        half.remove(input)
+        full.remove(input)
+        return half.toList() to full.toList()
     }
 }

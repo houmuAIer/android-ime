@@ -22,6 +22,7 @@ class AtokEmojiSwipePanel(context: Context) : View(context) {
         private const val MENU_BASE = 1000
         private const val CANCEL_CELL = MENU_BASE
         private const val EMOJI_PAGE_CELL = MENU_BASE + 1
+        private const val CLIPBOARD_CELL = MENU_BASE + 2
     }
 
     private var items: List<String> = emptyList()
@@ -50,6 +51,8 @@ class AtokEmojiSwipePanel(context: Context) : View(context) {
     }
 
     fun isEmojiPageCell(cell: Int): Boolean = cell == EMOJI_PAGE_CELL
+
+    fun isClipboardCell(cell: Int): Boolean = cell == CLIPBOARD_CELL
 
     private val menuTop: Float get() = height * 3f / 4f
 
@@ -123,14 +126,17 @@ class AtokEmojiSwipePanel(context: Context) : View(context) {
 
         textPaint.color = textColor
         val menuH = height - menuTop
-        for ((cell, label) in listOf(CANCEL_CELL to "×", EMOJI_PAGE_CELL to "☺")) {
+        for ((cell, label) in listOf(CANCEL_CELL to "×", EMOJI_PAGE_CELL to "☺", CLIPBOARD_CELL to "📋")) {
             val rect = cellRect(cell)
             textPaint.textSize = minOf(menuCw, menuH) * 0.42f
             val y = rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f
             canvas.drawText(label, rect.centerX(), y, textPaint)
-            if (cell == EMOJI_PAGE_CELL) {
+            if (cell == EMOJI_PAGE_CELL || cell == CLIPBOARD_CELL) {
                 textPaint.textSize = minOf(menuCw, menuH) * 0.16f
-                canvas.drawText("一覧", rect.centerX(), rect.bottom - 6f * density, textPaint)
+                canvas.drawText(
+                    if (cell == EMOJI_PAGE_CELL) "一覧" else "履歴",
+                    rect.centerX(), rect.bottom - 6f * density, textPaint
+                )
             }
         }
     }

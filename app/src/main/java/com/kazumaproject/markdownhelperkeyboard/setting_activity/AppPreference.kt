@@ -145,7 +145,8 @@ object AppPreference {
         CircularFlickDirection.SLOT_6
     )
 
-    private val CLIPBOARD_HISTORY_ENABLE = Pair("clipboard_history_preference", false)
+    // [atok-style] クリップボード履歴を最初から有効にする
+    private val CLIPBOARD_HISTORY_ENABLE = Pair("clipboard_history_preference", true)
     private val TIME_SAME_PRONOUNCE_TYPING = Pair("time_same_pronounce_typing_preference", 1000)
     private val FLICK_SENSITIVITY = Pair(FLICK_SENSITIVITY_KEY, 100)
     private val FLICK_THRESHOLD_SHAPE = Pair(
@@ -685,10 +686,10 @@ object AppPreference {
         Pair("tenkey_show_switch_ime_button_preference", true)
 
     private val ENABLE_ZENZ_PREFERENCE =
-        Pair("enable_ai_conversion_zenz_preference", false)
+        Pair("enable_ai_conversion_zenz_preference", true) // [atok-style] AI変換を最初から有効にする
 
     private val ENABLE_ZENZAI_PREFERENCE =
-        Pair("enable_ai_conversion_zenzai_preference", false)
+        Pair("enable_ai_conversion_zenzai_preference", true) // [atok-style] AI変換を最初から有効にする
 
     private val ZENZ_PROFILE_PREFERENCE =
         Pair("zenz_profile_string_preference", "")
