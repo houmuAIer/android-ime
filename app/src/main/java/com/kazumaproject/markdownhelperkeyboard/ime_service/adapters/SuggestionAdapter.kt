@@ -11,6 +11,7 @@ import android.text.Spanned
 import android.text.style.RelativeSizeSpan
 import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -637,6 +638,65 @@ class SuggestionAdapter internal constructor(
     }
 
     private var candidateSuggestions: List<Candidate> = emptyList()
+
+    // [atok-style] 候補に指が触れている間は候補欄を更新せず、指を置いた時点の候補で確定する
+    private var atokTouchActive = false
+    private var atokPendingSubmit: (() -> Unit)? = null
+    private var atokPressedCandidate: Candidate? = null
+    private var atokPressedPosition: Int = RecyclerView.NO_POSITION
+    private var atokPressedView: View? = null
+    private val atokItemTouchListeners =
+        HashMap<RecyclerView, RecyclerView.OnItemTouchListener>()
+    private val atokApplyPendingRunnable = Runnable { atokApplyPendingSuggestions() }
+
+    private fun atokApplyPendingSuggestions() {
+        if (atokTouchActive) return
+        val pending = atokPendingSubmit ?: return
+        atokPendingSubmit = null
+        pending()
+    }
+
+    private fun atokEndTouch(recyclerView: RecyclerView?) {
+        if (!atokTouchActive) return
+        atokTouchActive = false
+        if (atokPendingSubmit == null) return
+        // クリック処理（UP後に post される）を先に走らせてから保留分を反映する
+        recyclerView?.removeCallbacks(atokApplyPendingRunnable)
+        recyclerView?.postDelayed(atokApplyPendingRunnable, 120L)
+            ?: atokApplyPendingSuggestions()
+    }
+
+    private fun atokBindPressTracking(itemView: View, suggestion: Candidate, position: Int) {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return
+        itemView.setOnTouchListener { v, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                atokPressedCandidate = suggestion
+                atokPressedPosition = position
+                atokPressedView = v
+            }
+            false
+        }
+    }
+
+    /** クリックされたビューに指を置いた時点の候補と、その現在の位置を返す */
+    private fun atokResolvePressed(
+        itemView: View,
+        suggestion: Candidate,
+        position: Int
+    ): Pair<Candidate, Int> {
+        if (!com.kazumaproject.core.atok.AtokStyle.ENABLED) return suggestion to position
+        val pressed = atokPressedCandidate
+        val result = if (pressed != null && atokPressedView === itemView) {
+            val index = candidateSuggestions.indexOf(pressed)
+            pressed to (if (index >= 0) index else atokPressedPosition)
+        } else {
+            suggestion to position
+        }
+        atokPressedCandidate = null
+        atokPressedView = null
+        atokPressedPosition = RecyclerView.NO_POSITION
+        return result
+    }
     private val displayItemCallback = object : DiffUtil.ItemCallback<SuggestionDisplayItem>() {
         override fun areItemsTheSame(
             oldItem: SuggestionDisplayItem,
@@ -796,6 +856,15 @@ class SuggestionAdapter internal constructor(
         onCommitted: (() -> Unit)?,
     ) {
         traceDebugSection("SuggestionAdapter.submitContent") {
+            if (com.kazumaproject.core.atok.AtokStyle.ENABLED) {
+                if (atokTouchActive) {
+                    atokPendingSubmit = {
+                        submitContent(content, inlineSuggestionState, onCommitted)
+                    }
+                    return
+                }
+                atokPendingSubmit = null
+            }
             if (
                 currentContent == content &&
                 inlineSuggestionStripState == inlineSuggestionState
@@ -1497,10 +1566,38 @@ class SuggestionAdapter internal constructor(
         }
         recyclerViewLayoutListeners[recyclerView] = layoutListener
         recyclerView.addOnLayoutChangeListener(layoutListener)
+        if (com.kazumaproject.core.atok.AtokStyle.ENABLED) {
+            val touchListener = object : RecyclerView.SimpleOnItemTouchListener() {
+                override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
+                    when (e.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            rv.removeCallbacks(atokApplyPendingRunnable)
+                            atokTouchActive = true
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> atokEndTouch(rv)
+                    }
+                    return false
+                }
+
+                override fun onTouchEvent(rv: RecyclerView, e: MotionEvent) {
+                    when (e.actionMasked) {
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> atokEndTouch(rv)
+                    }
+                }
+            }
+            atokItemTouchListeners[recyclerView] = touchListener
+            recyclerView.addOnItemTouchListener(touchListener)
+        }
         updateInlineSuggestionRecyclerViews()
     }
 
     override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        atokItemTouchListeners.remove(recyclerView)?.let(recyclerView::removeOnItemTouchListener)
+        recyclerView.removeCallbacks(atokApplyPendingRunnable)
+        if (atokTouchActive) {
+            atokTouchActive = false
+            atokApplyPendingSuggestions()
+        }
         detachInlineSuggestionViews(recyclerView)
         attachedRecyclerViews.remove(recyclerView)?.let(recyclerView::removeItemDecoration)
         inlineScrollListeners.remove(recyclerView)?.let(recyclerView::removeOnScrollListener)
@@ -2151,11 +2248,14 @@ class SuggestionAdapter internal constructor(
             else -> ""
         }
         holder.itemView.isPressed = position == highlightedPosition
+        atokBindPressTracking(holder.itemView, suggestion, position)
         holder.itemView.setOnClickListener {
-            onItemClickListener?.invoke(suggestion, position)
+            val (pressed, pressedPosition) = atokResolvePressed(it, suggestion, position)
+            onItemClickListener?.invoke(pressed, pressedPosition)
         }
         holder.itemView.setOnLongClickListener {
-            onItemLongClickListener?.invoke(suggestion, position)
+            val (pressed, pressedPosition) = atokResolvePressed(it, suggestion, position)
+            onItemLongClickListener?.invoke(pressed, pressedPosition)
             true
         }
     }
@@ -2244,11 +2344,14 @@ class SuggestionAdapter internal constructor(
         }
 
         holder.itemView.isPressed = position == highlightedPosition
+        atokBindPressTracking(holder.itemView, suggestion, position)
         holder.itemView.setOnClickListener {
-            onItemClickListener?.invoke(suggestion, position)
+            val (pressed, pressedPosition) = atokResolvePressed(it, suggestion, position)
+            onItemClickListener?.invoke(pressed, pressedPosition)
         }
         holder.itemView.setOnLongClickListener {
-            onItemLongClickListener?.invoke(suggestion, position)
+            val (pressed, pressedPosition) = atokResolvePressed(it, suggestion, position)
+            onItemLongClickListener?.invoke(pressed, pressedPosition)
             true
         }
     }

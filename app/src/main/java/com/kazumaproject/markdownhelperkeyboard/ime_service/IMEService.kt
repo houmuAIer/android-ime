@@ -16904,6 +16904,26 @@ class IMEService : InputMethodService(), LifecycleOwner, InputConnection,
         if (zenzSlotState.requestToken != zenzLiveRequestToken) return localCandidates
         if (!shouldRequestZenzLiveGenerate(input, zenzSlotState.source)) return localCandidates
 
+        // [atok-style] AI候補は先頭に割り込ませず2番目に入れる。結果待ちの「...」枠も出さない。
+        // 先頭の候補が後から入れ替わり、タップした候補と違うもので確定してしまうのを防ぐ。
+        // 文節変換中（bunsetsuTarget あり）は先頭スロット前提の位置計算があるため従来どおり。
+        if (com.kazumaproject.core.atok.AtokStyle.ENABLED && zenzSlotState.bunsetsuTarget == null) {
+            val baseCandidates = localCandidates.withoutZenzLiveSlot(input)
+            val resultCandidate = zenzSlotState.candidate ?: return baseCandidates
+            val firstLocal = baseCandidates.firstOrNull() ?: return listOf(resultCandidate)
+            if (firstLocal.length.toInt() == input.length &&
+                getCandidateCommitString(firstLocal) == getCandidateCommitString(resultCandidate)
+            ) {
+                return baseCandidates
+            }
+            val rest = baseCandidates.withoutFirstDuplicateOfZenzSlotCandidate(
+                displayInput = input,
+                zenzSlotCandidate = resultCandidate
+            )
+            if (rest.isEmpty()) return listOf(resultCandidate)
+            return listOf(rest.first(), resultCandidate) + rest.drop(1)
+        }
+
         val zenzSlotCandidate = zenzSlotState.candidate ?: buildZenzLiveLoadingCandidate(input)
         val filteredLocalCandidates =
             if (zenzSlotState.candidate == null) {
